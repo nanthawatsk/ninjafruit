@@ -17,23 +17,23 @@ clock = pygame.time.Clock()
 
 # Load fruit images
 fruit_size = 150
-whole_watermelon = pygame.transform.scale(pygame.image.load('watermelon.png'), (fruit_size, 200))
-whole_pineapple = pygame.transform.scale(pygame.image.load('pineapple.png'), (200, 250))
-whole_orange = pygame.transform.scale(pygame.image.load('orange.png'), (100, 100))
-bomb_image = pygame.transform.scale(pygame.image.load('bomb.png'), (fruit_size, fruit_size))
+whole_watermelon = pygame.transform.scale(pygame.image.load('assets/watermelon.png'), (fruit_size, 200))
+whole_pineapple = pygame.transform.scale(pygame.image.load('assets/pineapple.png'), (200, 250))
+whole_orange = pygame.transform.scale(pygame.image.load('assets/orange.png'), (100, 100))
+bomb_image = pygame.transform.scale(pygame.image.load('assets/bomb.png'), (fruit_size, fruit_size))
 
 # Load sliced images
-sliced_watermelon_left = pygame.transform.scale(pygame.image.load('watermelon_left.png'), (fruit_size, 200))
-sliced_watermelon_right = pygame.transform.scale(pygame.image.load('watermelon_right.png'), (fruit_size, 200))
-sliced_pineapple_left = pygame.transform.scale(pygame.image.load('pineapple_left.png'), (200, 250))
-sliced_pineapple_right = pygame.transform.scale(pygame.image.load('pineapple_right.png'), (200, 250))
-sliced_orange_left = pygame.transform.scale(pygame.image.load('orange_left.png'), (100, 100))
-sliced_orange_right = pygame.transform.scale(pygame.image.load('orange_right.png'), (100, 100))
+sliced_watermelon_left = pygame.transform.scale(pygame.image.load('assets/watermelon_left.png'), (fruit_size, 200))
+sliced_watermelon_right = pygame.transform.scale(pygame.image.load('assets/watermelon_right.png'), (fruit_size, 200))
+sliced_pineapple_left = pygame.transform.scale(pygame.image.load('assets/pineapple_left.png'), (200, 250))
+sliced_pineapple_right = pygame.transform.scale(pygame.image.load('assets/pineapple_right.png'), (200, 250))
+sliced_orange_left = pygame.transform.scale(pygame.image.load('assets/orange_left.png'), (100, 100))
+sliced_orange_right = pygame.transform.scale(pygame.image.load('assets/orange_right.png'), (100, 100))
 
 # Load stain images
-stain_watermelon = pygame.image.load('stain_watermelon.png').convert_alpha()
-stain_pineapple = pygame.image.load('stain_pineapple.png').convert_alpha()
-stain_orange = pygame.image.load('stain_orange.png').convert_alpha()
+stain_watermelon = pygame.image.load('assets/stain_watermelon.png').convert_alpha()
+stain_pineapple = pygame.image.load('assets/stain_pineapple.png').convert_alpha()
+stain_orange = pygame.image.load('assets/stain_orange.png').convert_alpha()
 
 # Fruit images and points
 fruit_images = [whole_watermelon, whole_pineapple, whole_orange, bomb_image]

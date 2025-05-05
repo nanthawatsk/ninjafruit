@@ -11,7 +11,9 @@ from typing import Dict, List, Tuple, Optional
 
 # Initialize Mediapipe
 mp_pose = mp.solutions.pose
+mp_selfie_segmentation = mp.solutions.selfie_segmentation
 pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
 
 # Initialize Pygame and sound
 pygame.init()
@@ -101,6 +103,7 @@ class Assets:
             }
         }
         self.bomb = load_image('assets/bomb.png', CONFIG["fruit_sizes"]["bomb"])
+        self.background = load_image('assets/background2.png', (WIDTH, HEIGHT))
         
         self.sounds = {
             "slice": load_sound('sounds/slice.mp3'),
@@ -528,7 +531,7 @@ def main():
         
         # Gameplay loop
         while not game_state.game_over:
-            dt = 1.0  # No more slow-mo powerup
+            dt = 1
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -552,16 +555,34 @@ def main():
             if not ret:
                 break
             
-            # Process frame with MediaPipe
+            # Process frame with MediaPipe for segmentation
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = pose.process(frame_rgb)
+            segmentation_results = selfie_segmentation.process(frame_rgb)
+            
+            # Create segmentation mask
+            condition = np.stack((segmentation_results.segmentation_mask,) * 3, axis=-1) > 0.1
+            bg_image = pygame.surfarray.array3d(assets.background)
+            bg_image = np.transpose(bg_image, (1, 0, 2))  # Convert to (H, W, C)
+            bg_image = cv2.resize(bg_image, (frame.shape[1], frame.shape[0]))
+            bg_image = cv2.cvtColor(bg_image, cv2.COLOR_RGB2BGR)
+
+
+            # Apply segmentation - only keep player
+            output_image = np.where(condition, frame, bg_image)
             
             # Resize frame to match screen
-            frame_resized = cv2.resize(frame, (WIDTH, HEIGHT))
-            frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-            frame_surface = pygame.surfarray.make_surface(np.rot90(frame_rgb))
-            screen.blit(frame_surface, (0, 0))
+            output_image = cv2.resize(output_image, (WIDTH, HEIGHT))
+            output_image = cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB)
             
+            # Draw background first
+            screen.blit(assets.background, (0, 0))
+            
+            # Draw the segmented player
+            player_surface = pygame.surfarray.make_surface(np.rot90(output_image))
+            screen.blit(player_surface, (0, 0))
+            
+            # [Rest of your existing game update and rendering code remains unchanged]
             # Update game systems
             game_state.combo_system.update()
             game_state.particle_system.update()
@@ -640,13 +661,18 @@ def main():
                             game_state.slice_fruit(i)
             
             # Draw UI
-            screen.blit(assets.fonts["medium"].render(f"Score: {game_state.score}", True, (0, 0, 0)), (10, 10))
+            # Create a semi-transparent background for UI elements
+            ui_bg = pygame.Surface((WIDTH, 100), pygame.SRCALPHA)
+            ui_bg.fill((0, 0, 0, 128))
+            screen.blit(ui_bg, (0, 0))
+            
+            screen.blit(assets.fonts["medium"].render(f"Score: {game_state.score}", True, (255, 255, 255)), (10, 10))
             screen.blit(assets.fonts["medium"].render(f"Lives: {game_state.lives}", True, (255, 0, 0)), (WIDTH - 200, 10))
             
             level_text = f"Level: {game_state.level_system.current_level} (Next: {game_state.level_system.score_to_next_level})"
-            screen.blit(assets.fonts["small"].render(level_text, True, (0, 0, 0)), (WIDTH // 2 - 150, 15))
+            screen.blit(assets.fonts["small"].render(level_text, True, (255, 255, 255)), (WIDTH // 2 - 150, 15))
             
-            screen.blit(assets.fonts["medium"].render(f"Time: {int(game_state.time_limit)}", True, (0, 0, 0)), (WIDTH // 2 - 50, 50))
+            screen.blit(assets.fonts["medium"].render(f"Time: {int(game_state.time_limit)}", True, (255, 255, 255)), (WIDTH // 2 - 50, 50))
             
             if game_state.combo_system.current_combo > 0:
                 combo_color = (0, 255, 0) if game_state.combo_system.current_combo < 10 else \

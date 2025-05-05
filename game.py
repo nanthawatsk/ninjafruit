@@ -18,9 +18,9 @@ background = pygame.transform.scale(pygame.image.load('background.png'), (WIDTH,
 
 # Load fruit images and resize
 fruit_images = [
-    pygame.transform.scale(pygame.image.load('watermelon.png'), (40, 40)),
-    pygame.transform.scale(pygame.image.load('pineapple.png'), (40, 40)),
-    pygame.transform.scale(pygame.image.load('bomb.png'), (40, 40))
+    pygame.transform.scale(pygame.image.load('assets/watermelon.png'), (40, 40)),
+    pygame.transform.scale(pygame.image.load('assets/pineapple.png'), (40, 40)),
+    pygame.transform.scale(pygame.image.load('assets/bomb.png'), (40, 40))
 ]
 
 # Fruit points
