@@ -103,7 +103,7 @@ class Assets:
             }
         }
         self.bomb = load_image('assets/bomb.png', CONFIG["fruit_sizes"]["bomb"])
-        self.background = load_image('assets/background2.png', (WIDTH, HEIGHT))
+        self.background = load_image('assets/background.jpg', (WIDTH, HEIGHT))
         
         self.sounds = {
             "slice": load_sound('sounds/slice.mp3'),
@@ -566,6 +566,7 @@ def main():
             bg_image = np.transpose(bg_image, (1, 0, 2))  # Convert to (H, W, C)
             bg_image = cv2.resize(bg_image, (frame.shape[1], frame.shape[0]))
             bg_image = cv2.cvtColor(bg_image, cv2.COLOR_RGB2BGR)
+            bg_image = cv2.flip(bg_image, 1)
 
 
             # Apply segmentation - only keep player
