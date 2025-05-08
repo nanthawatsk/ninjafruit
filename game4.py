@@ -6,21 +6,21 @@ import numpy as np
 import math
 import json
 import os
+import threading
 from pygame import mixer
 from typing import Dict, List, Tuple, Optional
+from queue import Queue
 
 # Initialize Mediapipe
 mp_pose = mp.solutions.pose
 mp_selfie_segmentation = mp.solutions.selfie_segmentation
-pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(model_selection=1)
 
 # Initialize Pygame and sound
 pygame.init()
 mixer.init()
 infoObject = pygame.display.Info()
-WIDTH, HEIGHT = infoObject.current_w, infoObject.current_h
-screen = pygame.display.set_mode((1920, 1080), pygame.FULLSCREEN)
+WIDTH, HEIGHT = 1920, 1080  # Fixed size for consistency
+screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
 pygame.display.set_caption("Fruit Ninja with Pose Detection")
 clock = pygame.time.Clock()
 
@@ -501,16 +501,86 @@ def show_game_over(screen: pygame.Surface, game_state: GameState) -> None:
                 elif event.key == pygame.K_ESCAPE:
                     return "quit"
 
+class CameraThread(threading.Thread):
+    def __init__(self):
+        super().__init__()
+        self.queue = Queue(maxsize=3)  # Increased buffer to 3 frames
+        self.running = True
+        self.pose = mp_pose.Pose(
+            static_image_mode=False, 
+            min_detection_confidence=0.5, 
+            min_tracking_confidence=0.5
+        )
+        self.selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(
+            model_selection=1
+        )
+        self.cap = cv2.VideoCapture(0)
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()
+        
+        if not self.cap.isOpened():
+            print("Error: Could not open camera")
+            self.running = False
+        else:
+            # Slightly reduced resolution for better performance
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            self.cap.set(cv2.CAP_PROP_FPS, 60)  # Limit camera FPS
+        
+    def run(self):
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+            
+            # Process frame with MediaPipe
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pose_results = self.pose.process(frame_rgb)
+            
+            # Segmentation
+            segmentation_results = self.selfie_segmentation.process(frame_rgb)
+            
+            # Create mask with smoother edges
+            mask = segmentation_results.segmentation_mask
+            mask = cv2.GaussianBlur(mask, (7, 7), 0)
+            mask = (mask > 0.5).astype(np.float32)
+            mask = np.stack((mask,)*3, axis=-1)
+            
+            # Prepare background
+            bg_image = pygame.surfarray.array3d(assets.background)
+            bg_image = np.transpose(bg_image, (1, 0, 2))
+            bg_image = cv2.resize(bg_image, (frame.shape[1], frame.shape[0]))
+            
+            # Blend foreground and background
+            output_image = (frame_rgb * mask + bg_image * (1 - mask)).astype(np.uint8)
+            
+            # Resize to game resolution
+            output_image = cv2.resize(output_image, (WIDTH, HEIGHT))
+            
+            # Store the latest frame
+            with self.frame_lock:
+                self.latest_frame = (output_image, pose_results)
+            
+            # Put in queue if not full
+            if not self.queue.full():
+                self.queue.put((output_image, pose_results))
+                
+    def get_latest_frame(self):
+        with self.frame_lock:
+            return self.latest_frame
+            
+    def stop(self):
+        self.running = False
+        if hasattr(self, 'cap') and self.cap.isOpened():
+            self.cap.release()
+        if hasattr(self, 'pose'):
+            self.pose.close()
+
 # Main game function
 def main():
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open camera")
-        return
-    
-    # Set camera resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    # Start camera thread
+    camera_thread = CameraThread()
+    camera_thread.start()
     
     # Game state
     game_state = GameState()
@@ -544,61 +614,69 @@ def main():
             
             if game_state.paused:
                 # Show pause screen
-                screen.fill((0, 0, 0, 128), pygame.BLEND_RGBA_MULT)
+                screen.blit(assets.background, (0, 0))
                 paused_text = assets.fonts["large"].render("PAUSED", True, (255, 255, 255))
                 screen.blit(paused_text, (WIDTH//2 - paused_text.get_width()//2, HEIGHT//2))
                 pygame.display.flip()
                 continue
-            
-            # Get camera frame
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Process frame with MediaPipe for segmentation
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = pose.process(frame_rgb)
-            segmentation_results = selfie_segmentation.process(frame_rgb)
-            
-            # Create segmentation mask
-            condition = np.stack((segmentation_results.segmentation_mask,) * 3, axis=-1) > 0.1
-            bg_image = pygame.surfarray.array3d(assets.background)
-            bg_image = np.transpose(bg_image, (1, 0, 2))  # Convert to (H, W, C)
-            bg_image = cv2.resize(bg_image, (frame.shape[1], frame.shape[0]))
-            bg_image = cv2.cvtColor(bg_image, cv2.COLOR_RGB2BGR)
-            bg_image = cv2.flip(bg_image, 1)
 
-
-            # Apply segmentation - only keep player
-            output_image = np.where(condition, frame, bg_image)
-            
-            # Resize frame to match screen
-            output_image = cv2.resize(output_image, (WIDTH, HEIGHT))
-            output_image = cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB)
-            
-            # Draw background first
+            # Clear the screen at start of frame
             screen.blit(assets.background, (0, 0))
-            
-            # Draw the segmented player
-            player_surface = pygame.surfarray.make_surface(np.rot90(output_image))
-            screen.blit(player_surface, (0, 0))
-            
-            # [Rest of your existing game update and rendering code remains unchanged]
+
+            # Get camera frame with fallback mechanism
+            camera_frame = None
+            try:
+                camera_frame = camera_thread.queue.get_nowait()
+            except:
+                camera_frame = camera_thread.get_latest_frame()
+
+            if camera_frame:
+                output_image, pose_results = camera_frame
+                
+                # Draw camera feed with proper blending
+                player_surface = pygame.surfarray.make_surface(np.rot90(output_image))
+                # Remove set_colorkey as we're now properly handling transparency in the CameraThread
+                screen.blit(player_surface, (0, 0))
+                
+                # Hand detection and drawing
+                if pose_results and pose_results.pose_landmarks:
+                    landmarks = pose_results.pose_landmarks.landmark
+                    right_x = int((1 - landmarks[mp_pose.PoseLandmark.RIGHT_INDEX].x) * WIDTH)
+                    right_y = int(landmarks[mp_pose.PoseLandmark.RIGHT_INDEX].y * HEIGHT)
+                    left_x = int((1 - landmarks[mp_pose.PoseLandmark.LEFT_INDEX].x) * WIDTH)
+                    left_y = int(landmarks[mp_pose.PoseLandmark.LEFT_INDEX].y * HEIGHT)
+                    
+                    # Draw hand indicators with outline for better visibility
+                    pygame.draw.circle(screen, (255, 255, 255), (right_x, right_y), 22)
+                    pygame.draw.circle(screen, (255, 0, 0), (right_x, right_y), 20)
+                    pygame.draw.circle(screen, (255, 255, 255), (left_x, left_y), 22)
+                    pygame.draw.circle(screen, (0, 0, 255), (left_x, left_y), 20)
+                    
+                    # Check fruit collisions
+                    for i, fruit in enumerate(game_state.fruits[:]):
+                        if (fruit.rect.collidepoint(right_x, right_y) or 
+                            fruit.rect.collidepoint(left_x, left_y)):
+                            
+                            if fruit.type_idx == 4:  # Bomb
+                                game_state.hit_bomb(i)
+                            else:  # Regular fruit
+                                game_state.slice_fruit(i)
+
             # Update game systems
             game_state.combo_system.update()
             game_state.particle_system.update()
-            
+
             # Check level up
             if game_state.level_system.check_level_up(game_state.score):
                 show_level_intro(screen, game_state.level_system.current_level)
-            
+
             # Spawn fruits
             game_state.spawn_timer += 1 * dt
             if game_state.spawn_timer >= game_state.level_system.spawn_rate:
                 game_state.add_fruit()
                 game_state.spawn_timer = 0
-            
-            # Update fruits
+
+            # Update and draw fruits
             for i, fruit in enumerate(game_state.fruits[:]):
                 if fruit.update(dt):
                     if fruit.type_idx != 4:  # Not a bomb
@@ -621,60 +699,39 @@ def main():
                     )
                 else:
                     fruit.draw(screen)
-            
-            # Update sliced fruits
+
+            # Update and draw sliced fruits
             for piece in game_state.sliced_fruits[:]:
                 if piece.update(dt):
                     game_state.sliced_fruits.remove(piece)
                 else:
                     piece.draw(screen)
-            
-            # Update stains
+
+            # Update and draw stains
             for stain in game_state.stains[:]:
                 if stain.update():
                     game_state.stains.remove(stain)
                 else:
                     stain.draw(screen)
-            
+
             # Draw particles
             game_state.particle_system.draw(screen)
-            
-            # Handle hand detection
-            if results.pose_landmarks:
-                landmarks = results.pose_landmarks.landmark
-                right_x = int((1 - landmarks[mp_pose.PoseLandmark.RIGHT_INDEX].x) * WIDTH)
-                right_y = int(landmarks[mp_pose.PoseLandmark.RIGHT_INDEX].y * HEIGHT)
-                left_x = int((1 - landmarks[mp_pose.PoseLandmark.LEFT_INDEX].x) * WIDTH)
-                left_y = int(landmarks[mp_pose.PoseLandmark.LEFT_INDEX].y * HEIGHT)
-                
-                # Draw hand indicators
-                pygame.draw.circle(screen, (255, 0, 0), (right_x, right_y), 20)
-                pygame.draw.circle(screen, (0, 0, 255), (left_x, left_y), 20)
-                
-                # Check fruit collisions
-                for i, fruit in enumerate(game_state.fruits[:]):
-                    if (fruit.rect.collidepoint(right_x, right_y) or 
-                        fruit.rect.collidepoint(left_x, left_y)):
-                        
-                        if fruit.type_idx == 4:  # Bomb
-                            game_state.hit_bomb(i)
-                        else:  # Regular fruit
-                            game_state.slice_fruit(i)
-            
+
             # Draw UI
-            # Create a semi-transparent background for UI elements
             ui_bg = pygame.Surface((WIDTH, 100), pygame.SRCALPHA)
             ui_bg.fill((0, 0, 0, 128))
             screen.blit(ui_bg, (0, 0))
-            
+
+            # Score and lives display
             screen.blit(assets.fonts["medium"].render(f"Score: {game_state.score}", True, (255, 255, 255)), (10, 10))
             screen.blit(assets.fonts["medium"].render(f"Lives: {game_state.lives}", True, (255, 0, 0)), (WIDTH - 200, 10))
-            
+
+            # Level and time display
             level_text = f"Level: {game_state.level_system.current_level} (Next: {game_state.level_system.score_to_next_level})"
             screen.blit(assets.fonts["small"].render(level_text, True, (255, 255, 255)), (WIDTH // 2 - 150, 15))
-            
             screen.blit(assets.fonts["medium"].render(f"Time: {int(game_state.time_limit)}", True, (255, 255, 255)), (WIDTH // 2 - 50, 50))
-            
+
+            # Combo display
             if game_state.combo_system.current_combo > 0:
                 combo_color = (0, 255, 0) if game_state.combo_system.current_combo < 10 else \
                             (255, 255, 0) if game_state.combo_system.current_combo < 15 else \
@@ -682,14 +739,14 @@ def main():
                 combo_text = f"Combo: {game_state.combo_system.current_combo}x (x{game_state.combo_system.get_combo_multiplier()})"
                 screen.blit(assets.fonts["medium"].render(combo_text, True, combo_color), (WIDTH // 2 - 150, HEIGHT - 50))
                 screen.blit(assets.fonts["small"].render(f"Highest: {game_state.combo_system.highest_combo}x", True, (255, 255, 0)), (WIDTH - 300, HEIGHT - 50))
-            
+
             # Check game over conditions
-            game_state.time_limit -= 1 / 30 * dt
+            game_state.time_limit -= 1 / 60 * dt
             if game_state.time_limit <= 0 or game_state.lives <= 0:
                 game_state.game_over = True
-            
+
             pygame.display.flip()
-            clock.tick(30)
+            clock.tick(60) 
         
         # Game over handling
         if game_state.running:
@@ -700,8 +757,8 @@ def main():
                 game_state.game_over = False
     
     # Cleanup
-    cap.release()
-    cv2.destroyAllWindows()
+    camera_thread.stop()
+    camera_thread.join()
     pygame.quit()
 
 if __name__ == "__main__":
