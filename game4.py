@@ -523,9 +523,9 @@ class CameraThread(threading.Thread):
             self.running = False
         else:
             # Slightly reduced resolution for better performance
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-            self.cap.set(cv2.CAP_PROP_FPS, 60)  # Limit camera FPS
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)  # Limit camera FPS
         
     def run(self):
         while self.running:
