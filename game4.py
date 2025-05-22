@@ -12,16 +12,18 @@ from typing import Dict, List, Tuple, Optional
 from queue import Queue
 
 # Initialize Mediapipe
-mp_pose = mp.solutions.pose
+mp_hands = mp.solutions.hands
 mp_selfie_segmentation = mp.solutions.selfie_segmentation
 
 # Initialize Pygame and sound
 pygame.init()
 mixer.init()
 infoObject = pygame.display.Info()
-WIDTH, HEIGHT = 1920, 1080  # Fixed size for consistency
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
-pygame.display.set_caption("Fruit Ninja with Pose Detection")
+screen_width = infoObject.current_w
+screen_height = infoObject.current_h
+WIDTH, HEIGHT = screen_width, screen_height
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Fruit Ninja with Hand Detection")
 clock = pygame.time.Clock()
 
 # Load configuration
@@ -506,9 +508,10 @@ class CameraThread(threading.Thread):
         super().__init__()
         self.queue = Queue(maxsize=3)  # Increased buffer to 3 frames
         self.running = True
-        self.pose = mp_pose.Pose(
-            static_image_mode=False, 
-            min_detection_confidence=0.5, 
+        self.hands = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
         self.selfie_segmentation = mp_selfie_segmentation.SelfieSegmentation(
@@ -535,7 +538,7 @@ class CameraThread(threading.Thread):
             
             # Process frame with MediaPipe
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            pose_results = self.pose.process(frame_rgb)
+            hand_results = self.hands.process(frame_rgb)
             
             # Segmentation
             segmentation_results = self.selfie_segmentation.process(frame_rgb)
@@ -559,11 +562,11 @@ class CameraThread(threading.Thread):
             
             # Store the latest frame
             with self.frame_lock:
-                self.latest_frame = (output_image, pose_results)
+                self.latest_frame = (output_image, hand_results)
             
             # Put in queue if not full
             if not self.queue.full():
-                self.queue.put((output_image, pose_results))
+                self.queue.put((output_image, hand_results))
                 
     def get_latest_frame(self):
         with self.frame_lock:
@@ -573,8 +576,8 @@ class CameraThread(threading.Thread):
         self.running = False
         if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
-        if hasattr(self, 'pose'):
-            self.pose.close()
+        if hasattr(self, 'hands'):
+            self.hands.close()
 
 # Main game function
 def main():
@@ -631,36 +634,31 @@ def main():
                 camera_frame = camera_thread.get_latest_frame()
 
             if camera_frame:
-                output_image, pose_results = camera_frame
+                output_image, hand_results = camera_frame
                 
                 # Draw camera feed with proper blending
                 player_surface = pygame.surfarray.make_surface(np.rot90(output_image))
-                # Remove set_colorkey as we're now properly handling transparency in the CameraThread
                 screen.blit(player_surface, (0, 0))
                 
                 # Hand detection and drawing
-                if pose_results and pose_results.pose_landmarks:
-                    landmarks = pose_results.pose_landmarks.landmark
-                    right_x = int((1 - landmarks[mp_pose.PoseLandmark.RIGHT_INDEX].x) * WIDTH)
-                    right_y = int(landmarks[mp_pose.PoseLandmark.RIGHT_INDEX].y * HEIGHT)
-                    left_x = int((1 - landmarks[mp_pose.PoseLandmark.LEFT_INDEX].x) * WIDTH)
-                    left_y = int(landmarks[mp_pose.PoseLandmark.LEFT_INDEX].y * HEIGHT)
-                    
-                    # Draw hand indicators with outline for better visibility
-                    pygame.draw.circle(screen, (255, 255, 255), (right_x, right_y), 22)
-                    pygame.draw.circle(screen, (255, 0, 0), (right_x, right_y), 20)
-                    pygame.draw.circle(screen, (255, 255, 255), (left_x, left_y), 22)
-                    pygame.draw.circle(screen, (0, 0, 255), (left_x, left_y), 20)
-                    
-                    # Check fruit collisions
-                    for i, fruit in enumerate(game_state.fruits[:]):
-                        if (fruit.rect.collidepoint(right_x, right_y) or 
-                            fruit.rect.collidepoint(left_x, left_y)):
-                            
-                            if fruit.type_idx == 4:  # Bomb
-                                game_state.hit_bomb(i)
-                            else:  # Regular fruit
-                                game_state.slice_fruit(i)
+                if hand_results and hand_results.multi_hand_landmarks:
+                    for hand_landmarks in hand_results.multi_hand_landmarks:
+                        # Get Middle Finger MCP (joint at base of middle finger)
+                        mcp = hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_MCP]
+                        mcp_x = int((1 - mcp.x) * WIDTH)
+                        mcp_y = int(mcp.y * HEIGHT)
+                        
+                        # Draw hand indicator
+                        pygame.draw.circle(screen, (255, 255, 255), (mcp_x, mcp_y), 22)
+                        pygame.draw.circle(screen, (255, 0, 0), (mcp_x, mcp_y), 20)
+                        
+                        # Check fruit collisions
+                        for i, fruit in enumerate(game_state.fruits[:]):
+                            if fruit.rect.collidepoint(mcp_x, mcp_y):
+                                if fruit.type_idx == 4:  # Bomb
+                                    game_state.hit_bomb(i)
+                                else:  # Regular fruit
+                                    game_state.slice_fruit(i)
 
             # Update game systems
             game_state.combo_system.update()
