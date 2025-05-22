@@ -553,6 +553,7 @@ class CameraThread(threading.Thread):
             bg_image = pygame.surfarray.array3d(assets.background)
             bg_image = np.transpose(bg_image, (1, 0, 2))
             bg_image = cv2.resize(bg_image, (frame.shape[1], frame.shape[0]))
+            bg_image = cv2.flip(bg_image, 1)
             
             # Blend foreground and background
             output_image = (frame_rgb * mask + bg_image * (1 - mask)).astype(np.uint8)
